@@ -9,6 +9,7 @@ from transformers import BlipProcessor, BlipForConditionalGeneration, Wav2Vec2Pr
 from together import Together
 from gtts import gTTS
 import torch
+import torchaudio
 import soundfile as sf
 from io import BytesIO
 
@@ -80,6 +81,12 @@ def generate_image_caption(image):
 def transcribe_audio(audio_file):
     audio_processor, audio_model = load_audio_models()
     audio_data, sample_rate = sf.read(audio_file)
+    
+    if sample_rate != 16000:
+        # Resample the audio to 16 kHz
+        audio_data = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)(torch.tensor(audio_data).float())
+        sample_rate = 16000
+    
     input_values = audio_processor(audio_data, return_tensors="pt", sampling_rate=sample_rate).input_values
     logits = audio_model(input_values).logits
     predicted_ids = torch.argmax(logits, dim=-1)
