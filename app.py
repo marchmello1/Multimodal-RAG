@@ -1,5 +1,5 @@
 import streamlit as st
-import fitz  
+import fitz  # PyMuPDF
 import os
 import numpy as np
 from PIL import Image
@@ -16,20 +16,31 @@ from io import BytesIO
 api_key = st.secrets["api_keys"]["TOGETHER_API_KEY"]
 client = Together(api_key=api_key)
 
-# Function to load models on demand
+# Function to load text model
 @st.cache_resource
-def load_models():
-    text_model = SentenceTransformer('all-MiniLM-L6-v2')
-    image_model = SentenceTransformer('clip-ViT-B-32')
+def load_text_model():
+    return SentenceTransformer('all-MiniLM-L6-v2')
+
+# Function to load image model
+@st.cache_resource
+def load_image_model():
+    return SentenceTransformer('clip-ViT-B-32')
+
+# Function to load audio models
+@st.cache_resource
+def load_audio_models():
     audio_processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base-960h")
     audio_model = Wav2Vec2ForCTC.from_pretrained("facebook/wav2vec2-base-960h")
+    return audio_processor, audio_model
+
+# Function to load BLIP models
+@st.cache_resource
+def load_blip_models():
     blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
     blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
-    return text_model, image_model, audio_processor, audio_model, blip_processor, blip_model
+    return blip_processor, blip_model
 
-text_model, image_model, audio_processor, audio_model, blip_processor, blip_model = load_models()
-
-# Extraction function
+# Function to extract text and images from PDF
 def extract_text_and_images(pdf_file):
     pdf_data = pdf_file.read()
     doc = fitz.open(stream=pdf_data, filetype="pdf")
@@ -60,6 +71,7 @@ def generate_mistral_summary(text, max_length=150):
         return "Summary generation failed."
 
 def generate_image_caption(image):
+    blip_processor, blip_model = load_blip_models()
     try:
         inputs = blip_processor(image, return_tensors="pt")
         outputs = blip_model.generate(**inputs)
@@ -69,6 +81,7 @@ def generate_image_caption(image):
         return "Caption generation failed."
 
 def transcribe_audio(audio_file):
+    audio_processor, audio_model = load_audio_models()
     audio_data, sample_rate = sf.read(audio_file)
     input_values = audio_processor(audio_data, return_tensors="pt", sampling_rate=sample_rate).input_values
     logits = audio_model(input_values).logits
@@ -82,6 +95,7 @@ def text_to_audio(text, output_path):
     return output_path
 
 def multimodal_query(query, query_type='text', k=3):
+    text_model = load_text_model()
     if query_type == 'text':
         retrieved_texts = retrieve_text(query, k)
         summarized_texts = [generate_mistral_summary(text) for text in retrieved_texts if text.strip()]
@@ -89,6 +103,7 @@ def multimodal_query(query, query_type='text', k=3):
         final_response = generate_mistral_summary(combined_texts, max_length=300) if summarized_texts else combined_texts
 
     elif query_type == 'image':
+        image_model = load_image_model()
         retrieved_images = retrieve_images(query, k)
         image_captions = [generate_image_caption(img) for img in retrieved_images]
         final_response = " ".join(image_captions)
@@ -109,11 +124,13 @@ if pdf_file:
     texts, images = extract_text_and_images(pdf_file)
     st.success("PDF processed successfully!")
 
+    text_model = load_text_model()
     text_embeddings = text_model.encode(texts, convert_to_tensor=False)
     dimension_text = text_embeddings.shape[1]
     text_index = faiss.IndexFlatL2(dimension_text)
     text_index.add(text_embeddings)
 
+    image_model = load_image_model()
     image_embeddings = []
     for img in images:
         img = Image.open(img)
