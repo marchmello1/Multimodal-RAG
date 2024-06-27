@@ -1,5 +1,5 @@
 import streamlit as st
-import fitz 
+import fitz  # PyMuPDF
 import os
 import numpy as np
 from PIL import Image
@@ -128,76 +128,71 @@ def retrieve_images(query, k=10):
 # Streamlit app
 st.title("Multimodal RAG System")
 
-# Unified input
-input_type = st.selectbox("Select input type", ["Text", "Image", "Audio", "PDF"])
-input_data = None
+# File uploader
+uploaded_files = st.file_uploader("Upload files", type=["pdf", "jpg", "jpeg", "png", "wav", "mp3"], accept_multiple_files=True)
 
-if input_type == "Text":
-    input_data = st.text_area("Enter text")
+# Containers for text, images, and audio data
+texts = []
+images = []
+audios = []
 
-elif input_type == "Image":
-    uploaded_image = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
-    if uploaded_image:
-        input_data = Image.open(uploaded_image)
+# Process uploaded files
+for uploaded_file in uploaded_files:
+    file_type = uploaded_file.type.split('/')[0]
+    
+    if file_type == 'application' and uploaded_file.type.split('/')[1] == 'pdf':
+        pdf_texts, pdf_images = extract_text_and_images(uploaded_file)
+        texts.extend(pdf_texts)
+        images.extend(pdf_images)
+    elif file_type == 'image':
+        images.append(uploaded_file)
+    elif file_type == 'audio':
+        audios.append(uploaded_file)
 
-elif input_type == "Audio":
-    uploaded_audio = st.file_uploader("Upload an audio file", type=["wav", "mp3"])
-    if uploaded_audio:
-        input_data = BytesIO(uploaded_audio.read())
+# Compute embeddings if there are any texts or images
+if texts:
+    text_model = load_text_model()
+    text_embeddings = text_model.encode(texts, convert_to_tensor=False)
+    dimension_text = text_embeddings.shape[1]
+    text_index = faiss.IndexFlatL2(dimension_text)
+    text_index.add(text_embeddings)
 
-elif input_type == "PDF":
-    uploaded_pdf = st.file_uploader("Upload a PDF file", type=["pdf"])
-    if uploaded_pdf:
-        texts, images = extract_text_and_images(uploaded_pdf)
-        st.success("PDF processed successfully!")
-        input_data = {"texts": texts, "images": images}
+if images:
+    image_model = load_image_model()
+    image_embeddings = []
+    for img in images:
+        img = Image.open(img)
+        img_emb = image_model.encode(img, convert_to_tensor=False)
+        image_embeddings.append(img_emb)
+    
+    if image_embeddings:
+        image_embeddings = np.array(image_embeddings)
+        dimension_image = image_embeddings.shape[1]
+        image_index = faiss.IndexFlatL2(dimension_image)
+        image_index.add(image_embeddings)
+    else:
+        st.warning("No valid image embeddings were created.")
 
-if st.button("Submit"):
-    if input_type == "Text":
-        query = input_data
-        response, audio_output = multimodal_query(query, query_type='text')
-        st.write("Response:", response)
-        st.audio(audio_output)
+# Query input
+query = st.text_input("Ask a question about the uploaded files")
 
-    elif input_type == "Image":
-        image = input_data
-        caption = generate_image_caption(image)
-        st.image(image, caption=caption)
-
-    elif input_type == "Audio":
-        transcription = transcribe_audio(input_data)
-        response, audio_output = multimodal_query(transcription, query_type='text')
-        st.write("Transcription:", transcription)
-        st.write("Response:", response)
-        st.audio(audio_output)
-
-    elif input_type == "PDF":
-        texts = input_data["texts"]
-        images = input_data["images"]
-        
-        text_model = load_text_model()
-        text_embeddings = text_model.encode(texts, convert_to_tensor=False)
-        dimension_text = text_embeddings.shape[1]
-        text_index = faiss.IndexFlatL2(dimension_text)
-        text_index.add(text_embeddings)
-
-        image_model = load_image_model()
-        image_embeddings = []
-        for img in images:
-            img = Image.open(img)
-            img_emb = image_model.encode(img, convert_to_tensor=False)
-            image_embeddings.append(img_emb)
-        
-        if image_embeddings:
-            image_embeddings = np.array(image_embeddings)
-            dimension_image = image_embeddings.shape[1]
-            image_index = faiss.IndexFlatL2(dimension_image)
-            image_index.add(image_embeddings)
-        else:
-            st.warning("No valid image embeddings were created.")
-
-        query = st.text_input("Enter your query for the PDF content")
-        if st.button("Query PDF"):
+if st.button("Submit Query"):
+    if query:
+        # Determine the type of query and process accordingly
+        if texts and images:
             response, audio_output = multimodal_query(query, query_type='text')
-            st.write("Response:", response)
-            st.audio(audio_output)
+        elif texts:
+            response, audio_output = multimodal_query(query, query_type='text')
+        elif images:
+            response, audio_output = multimodal_query(query, query_type='image')
+        elif audios:
+            # Process the first audio file as an example
+            transcription = transcribe_audio(audios[0])
+            response, audio_output = multimodal_query(transcription, query_type='text')
+            st.write("Transcription:", transcription)
+
+        st.write("Response:", response)
+        st.audio(audio_output)
+        if images:
+            for img in images:
+                st.image(img, caption=generate_image_caption(img))
