@@ -1,0 +1,9 @@
+streamlit
+torch==2.0.1
+torchaudio==2.0.2
+sentence-transformers
+transformers
+gtts
+PyMuPDF
+faiss-cpu
+soundfile
