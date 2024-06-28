@@ -71,8 +71,15 @@ def query_hf_image_model(image):
         "inputs": img_base64
     }
     response = requests.post(HF_API_URL, headers=HF_HEADERS, json=payload)
-    result = response.json()
-    return result[0]['generated_text'] if 'generated_text' in result[0] else "Caption generation failed."
+    
+    try:
+        result = response.json()
+        if isinstance(result, list) and 'generated_text' in result[0]:
+            return result[0]['generated_text']
+        else:
+            return "Caption generation failed."
+    except Exception as e:
+        return f"Error processing image: {e}"
 
 def transcribe_audio(audio_file):
     audio_processor, audio_model = load_audio_models()
