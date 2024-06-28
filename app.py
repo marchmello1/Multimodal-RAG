@@ -12,28 +12,19 @@ from io import BytesIO
 # Load smaller text model
 @st.cache_resource
 def load_text_model():
-    model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
-    model = quantize_model(model)
-    return model
+    return SentenceTransformer('paraphrase-MiniLM-L6-v2')
 
 # Load audio models on demand
+@st.cache_resource
 def load_audio_models():
     audio_processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base-960h")
     audio_model = Wav2Vec2ForCTC.from_pretrained("facebook/wav2vec2-base-960h")
-    audio_model = quantize_model(audio_model)
     return audio_processor, audio_model
 
 # Load summarization model on demand
+@st.cache_resource
 def load_summarization_model():
-    model = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
-    model.model = quantize_model(model.model)
-    return model
-
-# Quantize a model
-def quantize_model(model):
-    model.to('cpu')
-    model = torch.quantization.convert(model)
-    return model
+    return pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
 
 # Extract text from PDF
 def extract_text_from_pdf(pdf_file):
@@ -56,9 +47,8 @@ def transcribe_audio(audio_file):
     if sample_rate != 16000:
         # Resample the audio to 16 kHz
         audio_data = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)(torch.tensor(audio_data).float())
-        sample_rate = 16000
     
-    input_values = audio_processor(audio_data, return_tensors="pt", sampling_rate=sample_rate).input_values
+    input_values = audio_processor(audio_data, return_tensors="pt", sampling_rate=16000).input_values
     logits = audio_model(input_values).logits
     predicted_ids = torch.argmax(logits, dim=-1)
     transcription = audio_processor.decode(predicted_ids[0])
