@@ -71,7 +71,8 @@ def query_hf_image_model(image):
         "inputs": img_base64
     }
     response = requests.post(HF_API_URL, headers=HF_HEADERS, json=payload)
-    return response.json()
+    result = response.json()
+    return result[0]['generated_text'] if 'generated_text' in result[0] else "Caption generation failed."
 
 def transcribe_audio(audio_file):
     audio_processor, audio_model = load_audio_models()
@@ -102,7 +103,7 @@ def multimodal_query(query, query_type='text', k=3):
         final_response = generate_mistral_summary(combined_texts, max_length=min(300, len(combined_texts)//2)) if summarized_texts else combined_texts
     elif query_type == 'image':
         retrieved_images = retrieve_images(query, k)
-        image_captions = [query_hf_image_model(img)['generated_text'] for img in retrieved_images]
+        image_captions = [query_hf_image_model(img) for img in retrieved_images]
         final_response = " ".join(image_captions)
     elif query_type == 'audio':
         transcription = transcribe_audio(query)
@@ -175,5 +176,5 @@ if st.button("Submit Query"):
         st.audio(audio_output)
         if images:
             for img in images:
-                img_caption = query_hf_image_model(img)['generated_text']
+                img_caption = query_hf_image_model(img)
                 st.image(img, caption=img_caption)
