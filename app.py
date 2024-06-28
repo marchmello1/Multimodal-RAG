@@ -6,7 +6,7 @@ from PIL import Image
 from sentence_transformers import SentenceTransformer
 import faiss
 from transformers import BlipProcessor, BlipForConditionalGeneration, Wav2Vec2Processor, Wav2Vec2ForCTC
-from together import Together
+from transformers import pipeline
 from gtts import gTTS
 import torch
 import torchaudio
@@ -15,24 +15,24 @@ from io import BytesIO
 
 # Set the API key from Streamlit secrets
 api_key = st.secrets["api_keys"]["TOGETHER_API_KEY"]
-client = Together(api_key=api_key)
 
-# Function to load models on demand
+# Function to load smaller text model
 @st.cache_resource
 def load_text_model():
-    return SentenceTransformer('all-MiniLM-L6-v2')
+    return SentenceTransformer('paraphrase-MiniLM-L6-v2')
 
+# Function to load smaller image model
 @st.cache_resource
 def load_image_model():
-    return SentenceTransformer('clip-ViT-B-32')
+    return SentenceTransformer('clip-ViT-B-16')
 
-@st.cache_resource
+# Function to load audio models on demand
 def load_audio_models():
     audio_processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base-960h")
     audio_model = Wav2Vec2ForCTC.from_pretrained("facebook/wav2vec2-base-960h")
     return audio_processor, audio_model
 
-@st.cache_resource
+# Function to load BLIP models on demand
 def load_blip_models():
     blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
     blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
@@ -57,16 +57,11 @@ def extract_text_and_images(pdf_file):
 
     return texts, images
 
-# Function to generate summaries using Together API
-def generate_mistral_summary(text, max_length=150):
-    try:
-        response = client.chat.completions.create(
-            model="mistralai/Mistral-7B-Instruct-v0.3",
-            messages=[{"role": "user", "content": f"Please summarize the following text: {text}"}],
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return "Summary generation failed."
+# Function to generate summaries using a smaller model
+def generate_summary(text, max_length=150):
+    summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+    summary = summarizer(text, max_length=max_length, min_length=30, do_sample=False)
+    return summary[0]['summary_text']
 
 def generate_image_caption(image):
     blip_processor, blip_model = load_blip_models()
@@ -102,9 +97,9 @@ def multimodal_query(query, query_type='text', k=3):
     text_model = load_text_model()
     if query_type == 'text':
         retrieved_texts = retrieve_text(query, k)
-        summarized_texts = [generate_mistral_summary(text) for text in retrieved_texts if text.strip()]
+        summarized_texts = [generate_summary(text) for text in retrieved_texts if text.strip()]
         combined_texts = " ".join(summarized_texts) if summarized_texts else "No valid text summaries available."
-        final_response = generate_mistral_summary(combined_texts, max_length=300) if summarized_texts else combined_texts
+        final_response = generate_summary(combined_texts, max_length=300) if summarized_texts else combined_texts
 
     elif query_type == 'image':
         image_model = load_image_model()
@@ -114,7 +109,7 @@ def multimodal_query(query, query_type='text', k=3):
 
     elif query_type == 'audio':
         transcription = transcribe_audio(query)
-        final_response = generate_mistral_summary(transcription, max_length=300)
+        final_response = generate_summary(transcription, max_length=300)
 
     audio_output_path = text_to_audio(final_response, "output_audio.mp3")
 
