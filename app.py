@@ -123,9 +123,7 @@ def retrieve_text(query, k=10):
 
 # Retrieve images
 def retrieve_images(query, k=10):
-    query_embedding = image_model.encode([query], convert_to_tensor=False)
-    distances, indices = image_index.search(query_embedding, k)
-    return [images[i] for i in indices[0]]
+    return images[:k]
 
 # Streamlit app
 st.title("Multimodal RAG System")
@@ -151,7 +149,7 @@ for uploaded_file in uploaded_files:
     elif file_type == 'audio':
         audios.append(uploaded_file)
 
-# Compute embeddings if there are any texts or images
+# Compute embeddings if there are any texts
 if texts:
     text_model = load_text_model()
     text_embeddings = text_model.encode(texts, convert_to_tensor=False)
@@ -159,36 +157,18 @@ if texts:
     text_index = faiss.IndexFlatL2(dimension_text)
     text_index.add(text_embeddings)
 
-if images:
-    image_model = load_text_model()
-    image_embeddings = []
-    for img in images:
-        img = Image.open(img)
-        img_emb = image_model.encode(img, convert_to_tensor=False)
-        image_embeddings.append(img_emb)
-    
-    if image_embeddings:
-        image_embeddings = np.array(image_embeddings)
-        dimension_image = image_embeddings.shape[1]
-        image_index = faiss.IndexFlatL2(dimension_image)
-        image_index.add(image_embeddings)
-    else:
-        st.warning("No valid image embeddings were created.")
-
 # Query input
 query = st.text_input("Ask a question about the uploaded files")
 
 if st.button("Submit Query"):
     if query:
-        if texts and images:
-            response, audio_output = multimodal_query(query, query_type='text')
-        elif texts:
+        if texts:
             response, audio_output = multimodal_query(query, query_type='text')
         elif images:
             response, audio_output = multimodal_query(query, query_type='image')
         elif audios:
             transcription = transcribe_audio(audios[0])
-            response, audio_output = multimodal_query(transcription, query_type='text')
+            response, audio_output = multimodal_query(transcription, query_type='audio')
             st.write("Transcription:", transcription)
         
         st.write("Response:", response)
