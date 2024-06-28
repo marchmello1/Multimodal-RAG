@@ -58,6 +58,7 @@ def generate_mistral_summary(text, max_length=150):
         response = client.chat.completions.create(
             model="mistralai/Mistral-7B-Instruct-v0.3",
             messages=[{"role": "user", "content": f"Please summarize the following text: {text}"}],
+            max_tokens=max_length
         )
         return response.choices[0].message.content
     except Exception as e:
@@ -96,16 +97,16 @@ def multimodal_query(query, query_type='text', k=3):
     if query_type == 'text':
         text_model = load_text_model()
         retrieved_texts = retrieve_text(query, k)
-        summarized_texts = [generate_mistral_summary(text) for text in retrieved_texts if text.strip()]
+        summarized_texts = [generate_mistral_summary(text, max_length=min(150, len(text)//2)) for text in retrieved_texts if text.strip()]
         combined_texts = " ".join(summarized_texts) if summarized_texts else "No valid text summaries available."
-        final_response = generate_mistral_summary(combined_texts, max_length=300) if summarized_texts else combined_texts
+        final_response = generate_mistral_summary(combined_texts, max_length=min(300, len(combined_texts)//2)) if summarized_texts else combined_texts
     elif query_type == 'image':
         retrieved_images = retrieve_images(query, k)
         image_captions = [query_hf_image_model(img)['generated_text'] for img in retrieved_images]
         final_response = " ".join(image_captions)
     elif query_type == 'audio':
         transcription = transcribe_audio(query)
-        final_response = generate_mistral_summary(transcription, max_length=300)
+        final_response = generate_mistral_summary(transcription, max_length=min(300, len(transcription)//2))
     else:
         final_response = "Unsupported query type."
 
@@ -159,7 +160,7 @@ if texts:
     text_index.add(text_embeddings)
 
 if images:
-    image_model = load_image_model()
+    image_model = load_text_model()
     image_embeddings = []
     for img in images:
         img = Image.open(img)
