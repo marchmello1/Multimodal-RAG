@@ -5,8 +5,7 @@ import numpy as np
 from PIL import Image
 from sentence_transformers import SentenceTransformer
 import faiss
-from transformers import BlipProcessor, BlipForConditionalGeneration, Wav2Vec2Processor, Wav2Vec2ForCTC
-from transformers import pipeline
+from transformers import pipeline, Wav2Vec2Processor, Wav2Vec2ForCTC
 from gtts import gTTS
 import torch
 import torchaudio
@@ -32,11 +31,9 @@ def load_audio_models():
     audio_model = Wav2Vec2ForCTC.from_pretrained("facebook/wav2vec2-base-960h")
     return audio_processor, audio_model
 
-# Function to load BLIP models on demand
-def load_blip_models():
-    blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-    blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
-    return blip_processor, blip_model
+# Function to load summarization model on demand
+def load_summarization_model():
+    return pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
 
 # Function to extract text and images from PDF
 def extract_text_and_images(pdf_file):
@@ -59,19 +56,9 @@ def extract_text_and_images(pdf_file):
 
 # Function to generate summaries using a smaller model
 def generate_summary(text, max_length=150):
-    summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+    summarizer = load_summarization_model()
     summary = summarizer(text, max_length=max_length, min_length=30, do_sample=False)
     return summary[0]['summary_text']
-
-def generate_image_caption(image):
-    blip_processor, blip_model = load_blip_models()
-    try:
-        inputs = blip_processor(image, return_tensors="pt")
-        outputs = blip_model.generate(**inputs)
-        caption = blip_processor.decode(outputs[0], skip_special_tokens=True)
-        return caption
-    except Exception as e:
-        return "Caption generation failed."
 
 def transcribe_audio(audio_file):
     audio_processor, audio_model = load_audio_models()
@@ -94,22 +81,17 @@ def text_to_audio(text, output_path):
     return output_path
 
 def multimodal_query(query, query_type='text', k=3):
-    text_model = load_text_model()
     if query_type == 'text':
+        text_model = load_text_model()
         retrieved_texts = retrieve_text(query, k)
         summarized_texts = [generate_summary(text) for text in retrieved_texts if text.strip()]
         combined_texts = " ".join(summarized_texts) if summarized_texts else "No valid text summaries available."
         final_response = generate_summary(combined_texts, max_length=300) if summarized_texts else combined_texts
-
-    elif query_type == 'image':
-        image_model = load_image_model()
-        retrieved_images = retrieve_images(query, k)
-        image_captions = [generate_image_caption(img) for img in retrieved_images]
-        final_response = " ".join(image_captions)
-
     elif query_type == 'audio':
         transcription = transcribe_audio(query)
         final_response = generate_summary(transcription, max_length=300)
+    else:
+        final_response = "Unsupported query type."
 
     audio_output_path = text_to_audio(final_response, "output_audio.mp3")
 
@@ -121,12 +103,6 @@ def retrieve_text(query, k=10):
     distances, indices = text_index.search(query_embedding, k)
     return [texts[i] for i in indices[0]]
 
-# Function to retrieve images
-def retrieve_images(query, k=10):
-    query_embedding = image_model.encode([query], convert_to_tensor=False)
-    distances, indices = image_index.search(query_embedding, k)
-    return [images[i] for i in indices[0]]
-
 # Streamlit app
 st.title("Multimodal RAG System")
 
@@ -135,7 +111,6 @@ uploaded_files = st.file_uploader("Upload files", type=["pdf", "jpg", "jpeg", "p
 
 # Containers for text, images, and audio data
 texts = []
-images = []
 audios = []
 
 # Process uploaded files
@@ -145,13 +120,10 @@ for uploaded_file in uploaded_files:
     if file_type == 'application' and uploaded_file.type.split('/')[1] == 'pdf':
         pdf_texts, pdf_images = extract_text_and_images(uploaded_file)
         texts.extend(pdf_texts)
-        images.extend(pdf_images)
-    elif file_type == 'image':
-        images.append(uploaded_file)
     elif file_type == 'audio':
         audios.append(uploaded_file)
 
-# Compute embeddings if there are any texts or images
+# Compute embeddings if there are any texts
 if texts:
     text_model = load_text_model()
     text_embeddings = text_model.encode(texts, convert_to_tensor=False)
@@ -159,42 +131,17 @@ if texts:
     text_index = faiss.IndexFlatL2(dimension_text)
     text_index.add(text_embeddings)
 
-if images:
-    image_model = load_image_model()
-    image_embeddings = []
-    for img in images:
-        img = Image.open(img)
-        img_emb = image_model.encode(img, convert_to_tensor=False)
-        image_embeddings.append(img_emb)
-    
-    if image_embeddings:
-        image_embeddings = np.array(image_embeddings)
-        dimension_image = image_embeddings.shape[1]
-        image_index = faiss.IndexFlatL2(dimension_image)
-        image_index.add(image_embeddings)
-    else:
-        st.warning("No valid image embeddings were created.")
-
 # Query input
 query = st.text_input("Ask a question about the uploaded files")
 
 if st.button("Submit Query"):
     if query:
-        # Determine the type of query and process accordingly
-        if texts and images:
+        if texts:
             response, audio_output = multimodal_query(query, query_type='text')
-        elif texts:
-            response, audio_output = multimodal_query(query, query_type='text')
-        elif images:
-            response, audio_output = multimodal_query(query, query_type='image')
         elif audios:
-            # Process the first audio file as an example
             transcription = transcribe_audio(audios[0])
             response, audio_output = multimodal_query(transcription, query_type='text')
             st.write("Transcription:", transcription)
-
+        
         st.write("Response:", response)
         st.audio(audio_output)
-        if images:
-            for img in images:
-                st.image(img, caption=generate_image_caption(img))
