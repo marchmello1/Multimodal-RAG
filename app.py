@@ -1,32 +1,39 @@
 import streamlit as st
 import fitz  # PyMuPDF
-import numpy as np
 from sentence_transformers import SentenceTransformer
 import faiss
-from transformers import pipeline, Wav2Vec2Processor, Wav2Vec2ForCTC
+from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC, pipeline
 from gtts import gTTS
 import torch
 import torchaudio
 import soundfile as sf
 from io import BytesIO
 
-# Set the API key from Streamlit secrets
-api_key = st.secrets["api_keys"]["TOGETHER_API_KEY"]
-
 # Load smaller text model
 @st.cache_resource
 def load_text_model():
-    return SentenceTransformer('paraphrase-MiniLM-L6-v2')
+    model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+    model = quantize_model(model)
+    return model
 
 # Load audio models on demand
 def load_audio_models():
     audio_processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base-960h")
     audio_model = Wav2Vec2ForCTC.from_pretrained("facebook/wav2vec2-base-960h")
+    audio_model = quantize_model(audio_model)
     return audio_processor, audio_model
 
 # Load summarization model on demand
 def load_summarization_model():
-    return pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+    model = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+    model.model = quantize_model(model.model)
+    return model
+
+# Quantize a model
+def quantize_model(model):
+    model.to('cpu')
+    model = torch.quantization.convert(model)
+    return model
 
 # Extract text from PDF
 def extract_text_from_pdf(pdf_file):
